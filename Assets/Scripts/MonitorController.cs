@@ -37,14 +37,19 @@ public class MonitorController : Singleton<MonitorController>
 
     private RectTransform rect;
 
+    [SerializeField] private GameObject[] winObjs;
+
     [field: SerializeField] public float TickTimer { get; private set; } = 0.25f;
     [SerializeField] private RectTransform monkeyParent;
+    [SerializeField] private List<MonkeySlot> monkeySlots;
+    [SerializeField] private TextMeshProUGUI totalKeysLabel;
+    [SerializeField] private RectTransform endLabelsParent;
 
     [Space(10)]
     private List<Monkey> monkeys = new List<Monkey>();
     [SerializeField] private Button shopButton_monkey;
     [SerializeField] private TextMeshProUGUI shop_monkey_costText;
-    private int cost_monkey = 10;
+    private int cost_monkey = 0;
     private int cost_monkey_increase = 10;
     [SerializeField] private GameObject prefab_monkey;
     private List<Monkey> monkeysToStartTyping = new List<Monkey>();
@@ -58,6 +63,8 @@ public class MonitorController : Singleton<MonitorController>
     [SerializeField] private GameObject prefab_gorilla;
     private List<Gorilla> gorillasToStartTyping = new List<Gorilla>();
 
+    private int totalKeys = 0;
+
     private void Awake()
     {
         rect = GetComponent<RectTransform>();
@@ -66,6 +73,8 @@ public class MonitorController : Singleton<MonitorController>
     // Start is called before the first frame update
     void Start()
     {
+        monkeySlots = monkeySlots.OrderBy(_ => Random.Range(0f, 1f)).ToList();
+
         monkeys = FindObjectsByType<Monkey>(FindObjectsSortMode.InstanceID).ToList();
         gorillas = FindObjectsByType<Gorilla>(FindObjectsSortMode.InstanceID).ToList();
 
@@ -81,14 +90,28 @@ public class MonitorController : Singleton<MonitorController>
         if (keys < cost_monkey)
             return;
 
-        Monkey monke = Instantiate(prefab_monkey, monkeyParent).GetComponent<Monkey>();
+        if (monkeySlots.Count == 0)
+            return;
+
+        MonkeySlot newSlot = monkeySlots[^1];
+        monkeySlots.RemoveAt(monkeySlots.Count - 1);
+        newSlot.ShowShadow();
+
+        Transform spawnedMonkeParent = Instantiate(prefab_monkey, monkeyParent).transform;
+        spawnedMonkeParent.transform.position = newSlot.transform.position;
+
+        Monkey monke = spawnedMonkeParent.GetComponentInChildren<Monkey>();
         monkeysToStartTyping.Add(monke);
         monkeys.Add(monke);
 
-        OnNumKeysChanged(keys - cost_monkey);
+        SFXController.Instance.PlayMonkeySFX();
+
+        int newKeys = keys - cost_monkey;
 
         cost_monkey += cost_monkey_increase;
         shop_monkey_costText.text = cost_monkey.ToString() + " keys";
+
+        OnNumKeysChanged(newKeys);
     }
 
     public void SpawnNewGorilla()
@@ -96,14 +119,28 @@ public class MonitorController : Singleton<MonitorController>
         if (keys < cost_gorilla)
             return;
 
-        Gorilla gorilla = Instantiate(prefab_gorilla, monkeyParent).GetComponent<Gorilla>();
+        if (monkeySlots.Count == 0)
+            return;
+
+        MonkeySlot newSlot = monkeySlots[^1];
+        monkeySlots.RemoveAt(monkeySlots.Count - 1);
+        newSlot.ShowShadow();
+
+        Transform spawnedGorillaParent = Instantiate(prefab_gorilla, monkeyParent).transform;
+        spawnedGorillaParent.transform.position = newSlot.transform.position;
+
+        Gorilla gorilla = spawnedGorillaParent.GetComponentInChildren<Gorilla>();
         gorillasToStartTyping.Add(gorilla);
         gorillas.Add(gorilla);
 
-        OnNumKeysChanged(keys - cost_gorilla);
+        SFXController.Instance.PlayGorillaSFX();
+
+        int newKeys = keys - cost_gorilla;
 
         cost_gorilla += cost_gorilla_increase;
         shop_gorilla_costText.text = cost_gorilla.ToString() + " keys";
+
+        OnNumKeysChanged(newKeys);
     }
 
     public void OnInputChanged(string _input)
@@ -140,6 +177,7 @@ public class MonitorController : Singleton<MonitorController>
 
             SetTargetWord(inputfield.text);
             tickRoutine = Routine.Start(this, TickRoutine());
+            Timer.Instance.StartTimer();
         }
     }
 
@@ -212,12 +250,18 @@ public class MonitorController : Singleton<MonitorController>
         }
 
         OnNumKeysChanged(keys + _submittedLetters.Count + _numCorrectLetters);
+        totalKeys += _submittedLetters.Count;
+
+        float percent = ((float)currIndex) / correctWord.Count;
 
         if (_numCorrectLetters > 0)
         {
             typingText.text += "<color=#" + Utils.ColorToHex(CorrectColor) + $">{CorrectLetter}</color>";
 
             currIndex++;
+
+            CorrectLetterSFX.Instance.PlaySound(percent);
+            ScreenShakeController.Instance.DoScreenShake(percent);
 
             if (currIndex < correctWord.Count)
             {
@@ -237,6 +281,8 @@ public class MonitorController : Singleton<MonitorController>
                 {
                     gorilla.StopAnimation();
                 }
+
+                Routine.Start(this, WinRoutine());
             }
         }
         else
@@ -244,6 +290,12 @@ public class MonitorController : Singleton<MonitorController>
             typingText.text += "<color=#" + Utils.ColorToHex(WrongColor) + $">{_submittedLetters[0]}</color>";
 
             resetOnNextType = true;
+
+            if (currIndex > 0)
+            {
+                SFXController.Instance.PlayFailSFX();
+                ScreenShakeController.Instance.DoScreenShake(percent);
+            }
         }
     }
 
@@ -256,10 +308,15 @@ public class MonitorController : Singleton<MonitorController>
 
     private IEnumerator TickRoutine()
     {
+        keys = cost_monkey;
+        SpawnNewMonkey();
+
         foreach (Monkey monke in monkeys)
         {
             monke.StartAnimation();
         }
+
+        Music.Instance.PlayMusic();
 
         while (gameWon == false)
         {
@@ -267,6 +324,36 @@ public class MonitorController : Singleton<MonitorController>
 
             DoTick();
         }
+    }
+
+    private bool rebuilt = false;
+
+    private IEnumerator WinRoutine()
+    {
+        Timer.Instance.StopTimer();
+        if (totalKeys == 1)
+            totalKeysLabel.text = $"{totalKeys} KEY TYPED";
+        else
+            totalKeysLabel.text = $"{totalKeys} KEYS TYPED";
+
+        for (int i = 0; i < winObjs.Length; i++)
+        {
+            winObjs[i].SetActive(true);
+            if (endLabelsParent.gameObject.activeSelf && !rebuilt)
+            {
+                yield return null;
+                LayoutRebuilder.ForceRebuildLayoutImmediate(endLabelsParent);
+                yield return null;
+                LayoutRebuilder.ForceRebuildLayoutImmediate(endLabelsParent);
+                yield return null;
+                LayoutRebuilder.ForceRebuildLayoutImmediate(endLabelsParent);
+                rebuilt = true;
+            }
+
+            yield return 0.25f;
+        }
+
+        SFXController.Instance.PlayYippieSFX();
     }
 
     private void OnNumKeysChanged(int _newKeys)

@@ -28,4 +28,27 @@ public static class Utils
         string hex = color.r.ToString("X2") + color.g.ToString("X2") + color.b.ToString("X2");
         return hex;
     }
+
+
+    public static string TimeToString(float _secs)
+    {
+        float secsNum = _secs;
+
+        int mins = Mathf.FloorToInt(secsNum / 60);
+        string minsStr = mins.ToString();
+        if (minsStr.Length < 1)
+            minsStr = "0" + minsStr;
+
+        int secs = Mathf.FloorToInt(secsNum - mins * 60);
+        string secsStr = secs.ToString();
+        if (secsStr.Length < 2)
+            secsStr = "0" + secsStr;
+
+        int ms = Mathf.FloorToInt((secsNum % 1) * 1000);
+        string msStr = ms.ToString();
+        while (msStr.Length < 3)
+            msStr = "0" + msStr;
+
+        return minsStr + ":" + secsStr + ":" + msStr;
+    }
 }
